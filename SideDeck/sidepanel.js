@@ -1,8 +1,12 @@
-/* 全データ保持変数（categoryOrderで並び順を記憶します） */
+/* 
+ [処理内容]
+ SideDeck v1.0.2 のロジックプログラムです。
+ customCategories が空（undefined）で渡された場合でも絶対に落ちないよう防御処理（|| []）を追加・修正いたしました。
+*/
 let activeTasks = [], completedTasks = [], customCategories = [], collapsedCategories = {}, categoryOrder = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadAndRender(); setupSmartDropdownPanels(); setupDragAndDrop();
+  await loadAndRender(); setupSmartDropdownPanels(); setupTaskCardDragAndDrop();
   setupCategoryDragAndDrop(); setupImageDropAndPaste(); setupInlineManualInput();
   setupSortButton(); setupBackupAndRestore(); setupCategoryManageButtons();
 });
@@ -51,7 +55,7 @@ function setupCategoryManageButtons() {
   dBtn.addEventListener('click', () => {
     pCat.classList.remove('open'); dForm.classList.toggle('open');
     if (dForm.classList.contains('open')) {
-      const all = new Set([...customCategories]);
+      const all = new Set([...(customCategories || [])]);
       [...activeTasks, ...completedTasks].forEach(t => { if (t.categories) t.categories.forEach(c => { if (c && c !== '未分類') all.add(c); }); });
       dSelect.innerHTML = '<option value="">-- 削除するカテゴリを選択 --</option>';
       Array.from(all).forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = `🗑️ ${c}`; dSelect.appendChild(o); });
@@ -62,8 +66,8 @@ function setupCategoryManageButtons() {
   dSub.addEventListener('click', async () => {
     const t = dSelect.value; if (!t) return alert('削除するカテゴリを選択してください。');
     if (confirm(`カテゴリ「${t}」を削除しますか？\n※チケットは削除されず「未分類」などに安全に残ります。`)) {
-      customCategories = customCategories.filter(c => c !== t);
-      categoryOrder = categoryOrder.filter(c => c !== t);
+      customCategories = (customCategories || []).filter(c => c !== t);
+      categoryOrder = (categoryOrder || []).filter(c => c !== t);
       activeTasks.forEach(x => { if (x.categories) x.categories = x.categories.filter(c => c !== t); });
       completedTasks.forEach(x => { if (x.categories) x.categories = x.categories.filter(c => c !== t); });
       await chrome.storage.local.set({ activeTasks, completedTasks, customCategories, categoryOrder });
@@ -74,7 +78,7 @@ function setupCategoryManageButtons() {
 
 function updateCategoryDropdown() {
   const s = document.getElementById('manual-category-select'); if (!s) return;
-  const set = new Set(customCategories);
+  const set = new Set(customCategories || []);
   [...activeTasks, ...completedTasks].forEach(t => { if (t.categories) t.categories.forEach(c => { if (c && c !== '未分類') set.add(c); }); });
   s.innerHTML = '<option value="">-- 既存カテゴリから選択 (任意) --</option>';
   set.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = `📁 ${c}`; s.appendChild(o); });
@@ -139,23 +143,18 @@ function createGoogleCalendarUrl(subject, details, dueDateStr) {
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${t}&dates=${c}/${c}&details=${d}`;
 }
 
-/* 💡 「未分類」最上部固定 ＋ ドラッグ並べ替え ＋ 完了履歴カテゴリ別折りたたみ描画 */
 function render() {
   const tc = document.getElementById('task-container'), hc = document.getElementById('history-container'), count = document.getElementById('task-counter');
   if (!tc || !hc) return;
   tc.innerHTML = ''; hc.innerHTML = '';
 
-  /* 未完了タスクのグループ化 */
-  const groups = {}; customCategories.forEach(c => groups[c] = []);
+  const groups = {}; (customCategories || []).forEach(c => groups[c] = []);
   activeTasks.forEach(t => { const cats = (t.categories && t.categories.length > 0) ? t.categories : ['未分類']; cats.forEach(c => { if (!groups[c]) groups[c] = []; groups[c].push(t); }); });
 
-  /* カテゴリの並び順（未分類は一番上固定） */
   const allCatNames = Object.keys(groups);
   const orderedCats = ['未分類'];
 
-  /* 保存されている並び順に従って追加 */
-  categoryOrder.forEach(c => { if (c !== '未分類' && allCatNames.includes(c) && !orderedCats.includes(c)) orderedCats.push(c); });
-  /* 残りの新規カテゴリを追加 */
+  (categoryOrder || []).forEach(c => { if (c !== '未分類' && allCatNames.includes(c) && !orderedCats.includes(c)) orderedCats.push(c); });
   allCatNames.forEach(c => { if (!orderedCats.includes(c)) orderedCats.push(c); });
 
   orderedCats.forEach(cName => {
@@ -166,7 +165,7 @@ function render() {
 
     const head = document.createElement('div');
     head.className = `category-header ${isFixed ? 'fixed-cat' : ''}`;
-    if (!isFixed) sec.draggable = true; /* 💡 未分類以外はドラッグ可能 */
+    if (!isFixed) sec.draggable = true;
 
     head.innerHTML = `<span>📁 ${cName} (${groups[cName].length}件)</span><span>${isCol ? '► 開く' : '▼ 閉じる'}</span>`;
     const cont = document.createElement('div'); cont.className = `category-content ${isCol ? 'collapsed' : ''}`;
@@ -181,7 +180,6 @@ function render() {
     sec.appendChild(head); sec.appendChild(cont); tc.appendChild(sec);
   });
 
-  /* 💡 完了履歴もカテゴリごとにグループ化して折りたたみ描画 */
   const historyGroups = {};
   completedTasks.forEach(t => {
     const cats = (t.categories && t.categories.length > 0) ? t.categories : ['未分類'];
@@ -213,12 +211,73 @@ function render() {
   document.getElementById('history-toggle-btn').innerText = `完了履歴(${completedTasks.length}件) v`;
 }
 
-/* 💡 カテゴリ枠自体のドラッグ＆ドロップ並べ替え処理 */
+function setupTaskCardDragAndDrop() {
+  const container = document.getElementById('task-container');
+  let draggedCard = null;
+
+  container.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.task-card');
+    if (card) {
+      draggedCard = card;
+      card.classList.add('dragging');
+      e.stopPropagation();
+    }
+  });
+
+  container.addEventListener('dragover', (e) => {
+    if (!draggedCard) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const parentContent = draggedCard.closest('.category-content');
+    if (!parentContent) return;
+
+    const cards = [...parentContent.querySelectorAll('.task-card:not(.dragging)')];
+    const afterCard = cards.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = e.clientY - box.top - box.height / 2;
+      return (offset < 0 && offset > closest.offset) ? { offset, element: child } : closest;
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+
+    if (afterCard == null) {
+      parentContent.appendChild(draggedCard);
+    } else {
+      parentContent.insertBefore(draggedCard, afterCard);
+    }
+  });
+
+  container.addEventListener('dragend', async (e) => {
+    if (draggedCard) {
+      draggedCard.classList.remove('dragging');
+      
+      const currentCards = [...container.querySelectorAll('.task-card')];
+      const newActiveTasks = [];
+
+      currentCards.forEach(cardEl => {
+        const found = activeTasks.find(t => (t.id || activeTasks.indexOf(t).toString()) === cardEl.dataset.id);
+        if (found && !newActiveTasks.includes(found)) {
+          newActiveTasks.push(found);
+        }
+      });
+
+      activeTasks.forEach(t => {
+        if (!newActiveTasks.includes(t)) newActiveTasks.push(t);
+      });
+
+      activeTasks = newActiveTasks;
+      await chrome.storage.local.set({ activeTasks });
+      draggedCard = null;
+    }
+  });
+}
+
 function setupCategoryDragAndDrop() {
   const container = document.getElementById('task-container');
   let draggedCat = null;
 
   container.addEventListener('dragstart', (e) => {
+    if (e.target.closest('.task-card')) return;
+
     const sec = e.target.closest('.category-section');
     if (sec && sec.dataset.cat !== '未分類') {
       draggedCat = sec;
@@ -227,16 +286,22 @@ function setupCategoryDragAndDrop() {
   });
 
   container.addEventListener('dragover', (e) => {
-    e.preventDefault();
     if (!draggedCat) return;
+    e.preventDefault();
+
     const sections = [...container.querySelectorAll('.category-section:not(.dragging-cat)')];
     const afterSec = sections.reduce((closest, child) => {
-      if (child.dataset.cat === '未分類') return closest; /* 未分類の上には並べ替え不可 */
-      const box = child.getBoundingClientRect(), offset = e.clientY - box.top - box.height / 2;
+      if (child.dataset.cat === '未分類') return closest;
+      const box = child.getBoundingClientRect();
+      const offset = e.clientY - box.top - box.height / 2;
       return (offset < 0 && offset > closest.offset) ? { offset, element: child } : closest;
     }, { offset: Number.NEGATIVE_INFINITY }).element;
 
-    afterSec == null ? container.appendChild(draggedCat) : container.insertBefore(draggedCat, afterSec);
+    if (afterSec == null) {
+      container.appendChild(draggedCat);
+    } else {
+      container.insertBefore(draggedCat, afterSec);
+    }
   });
 
   container.addEventListener('dragend', async () => {
@@ -349,9 +414,10 @@ function createCardElement(task, index, isCompleted) {
 
   if (task.imageUrl) card.querySelector('.task-image-preview').addEventListener('click', () => { const w = window.open(""); w.document.write(`<img src="${task.imageUrl}" style="max-width:100%;" />`); });
 
+  /* 💡 エラー防止（customCategories || []）を追加した安全なカテゴリ変更ダイアログ処理 */
   const catWrap = card.querySelector('.cat-tags-wrap');
   catWrap.addEventListener('dblclick', () => {
-    const allSet = new Set(customCategories); [...activeTasks, ...completedTasks].forEach(t => { if (t.categories) t.categories.forEach(c => { if (c && c !== '未分類') allSet.add(c); }); });
+    const allSet = new Set(customCategories || []); [...activeTasks, ...completedTasks].forEach(t => { if (t.categories) t.categories.forEach(c => { if (c && c !== '未分類') allSet.add(c); }); });
     const catList = Array.from(allSet), targetArr = isCompleted ? completedTasks : activeTasks, curCats = targetArr[index].categories || [];
     const multiBox = document.createElement('div'); multiBox.className = 'card-cat-multi-box';
 
@@ -410,32 +476,6 @@ function createCardElement(task, index, isCompleted) {
     }
   });
   return card;
-}
-
-function setupDragAndDrop() {
-  const container = document.getElementById('task-container'); let dragged = null;
-  container.addEventListener('dragstart', (e) => {
-    if (e.target.closest('.category-header')) return; /* カテゴリ移動時はカード移動を無視 */
-    const c = e.target.closest('.task-card'); if (c) { dragged = c; c.classList.add('dragging'); }
-  });
-  container.addEventListener('dragover', (e) => {
-    e.preventDefault(); if (!dragged) return;
-    const els = [...container.querySelectorAll('.task-card:not(.dragging)')];
-    const after = els.reduce((closest, child) => { const box = child.getBoundingClientRect(), offset = e.clientY - box.top - box.height / 2; return (offset < 0 && offset > closest.offset) ? { offset, element: child } : closest; }, { offset: Number.NEGATIVE_INFINITY }).element;
-    after == null ? container.appendChild(dragged) : container.insertBefore(dragged, after);
-  });
-  container.addEventListener('dragend', async (e) => {
-    const c = e.target.closest('.task-card');
-    if (c) {
-      c.classList.remove('dragging');
-      const newActive = [];
-      [...container.querySelectorAll('.task-card')].forEach(el => {
-        const found = activeTasks.find(t => (t.id || activeTasks.indexOf(t).toString()) === el.dataset.id);
-        if (found && !newActive.includes(found)) newActive.push(found);
-      });
-      activeTasks = newActive; await chrome.storage.local.set({ activeTasks }); dragged = null;
-    }
-  });
 }
 
 document.getElementById('history-toggle-btn').addEventListener('click', () => document.getElementById('history-container').classList.toggle('open'));
