@@ -1,7 +1,7 @@
 /* 
  [処理内容]
- SideDeck v1.0.2 のロジックプログラムです。
- customCategories が空（undefined）で渡された場合でも絶対に落ちないよう防御処理（|| []）を追加・修正いたしました。
+ SideDeck v1.0.3 のロジックプログラムです。
+ 件名（task-subject）と本文（task-title）のダブルクリックによる内容編集＆自動保存処理を完全に復元いたしました。
 */
 let activeTasks = [], completedTasks = [], customCategories = [], collapsedCategories = {}, categoryOrder = [];
 
@@ -217,7 +217,8 @@ function setupTaskCardDragAndDrop() {
 
   container.addEventListener('dragstart', (e) => {
     const card = e.target.closest('.task-card');
-    if (card) {
+    /* 編集中の文字選択ドラッグ時はカード移動を行いません */
+    if (card && !e.target.isContentEditable) {
       draggedCard = card;
       card.classList.add('dragging');
       e.stopPropagation();
@@ -396,6 +397,9 @@ function createDueDateHtml(dStr) {
   return `<div class="${cls}">${txt}</div>`;
 }
 
+/* 
+ [機能修復: カード描画および件名・本文のダブルクリック編集イベント登録]
+*/
 function createCardElement(task, index, isCompleted) {
   const card = document.createElement('div'); card.className = `task-card ${task.isImportant ? 'important' : ''} ${isCompleted ? 'completed-card' : ''}`;
   if (!isCompleted) { card.draggable = true; card.dataset.id = task.id || index.toString(); }
@@ -414,9 +418,10 @@ function createCardElement(task, index, isCompleted) {
 
   if (task.imageUrl) card.querySelector('.task-image-preview').addEventListener('click', () => { const w = window.open(""); w.document.write(`<img src="${task.imageUrl}" style="max-width:100%;" />`); });
 
-  /* 💡 エラー防止（customCategories || []）を追加した安全なカテゴリ変更ダイアログ処理 */
+  /* ダブルクリックでの複数カテゴリ選択チェックボックス処理 */
   const catWrap = card.querySelector('.cat-tags-wrap');
-  catWrap.addEventListener('dblclick', () => {
+  catWrap.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
     const allSet = new Set(customCategories || []); [...activeTasks, ...completedTasks].forEach(t => { if (t.categories) t.categories.forEach(c => { if (c && c !== '未分類') allSet.add(c); }); });
     const catList = Array.from(allSet), targetArr = isCompleted ? completedTasks : activeTasks, curCats = targetArr[index].categories || [];
     const multiBox = document.createElement('div'); multiBox.className = 'card-cat-multi-box';
@@ -439,22 +444,49 @@ function createCardElement(task, index, isCompleted) {
     multiBox.querySelector('#multi-box-cancel-btn').addEventListener('click', () => render());
   });
 
+  /* 💡 【バグ修復】件名および本文のダブルクリック編集イベントリスナーを確実にセットします */
+  const subDiv = card.querySelector('.task-subject');
+  const titDiv = card.querySelector('.task-title');
+
+  /* フォーカスが外れた際（blur）に自動保存する共通関数 */
+  const saveContent = async () => {
+    if (subDiv.isContentEditable || titDiv.isContentEditable) {
+      subDiv.contentEditable = "false";
+      titDiv.contentEditable = "false";
+      subDiv.classList.remove('editing');
+      titDiv.classList.remove('editing');
+
+      if (isCompleted) {
+        completedTasks[index].subject = subDiv.innerText;
+        completedTasks[index].title = titDiv.innerText;
+        await chrome.storage.local.set({ completedTasks });
+      } else {
+        activeTasks[index].subject = subDiv.innerText;
+        activeTasks[index].title = titDiv.innerText;
+        await chrome.storage.local.set({ activeTasks });
+      }
+    }
+  };
+
+  /* 編集開始関数 */
+  const startEditing = (element) => {
+    element.contentEditable = "true";
+    element.classList.add('editing');
+    element.focus();
+  };
+
+  /* ダブルクリック時に編集モード（入力可能）へ移行させます */
+  subDiv.addEventListener('dblclick', (e) => { e.stopPropagation(); startEditing(subDiv); });
+  titDiv.addEventListener('dblclick', (e) => { e.stopPropagation(); startEditing(titDiv); });
+
+  /* フォーカスアウト時に自動保存を実行します */
+  subDiv.addEventListener('blur', () => setTimeout(saveContent, 100));
+  titDiv.addEventListener('blur', () => setTimeout(saveContent, 100));
+
   if (!isCompleted) {
     const dBtn = card.querySelector('.date-btn'), dInp = card.querySelector('.date-input-hidden');
     dBtn.addEventListener('click', () => { dInp.showPicker ? dInp.showPicker() : dInp.click(); });
     dInp.addEventListener('change', async (e) => { activeTasks[index].dueDate = e.target.value; await chrome.storage.local.set({ activeTasks }); });
-
-    const subDiv = card.querySelector('.task-subject'), titDiv = card.querySelector('.task-title');
-    const save = async () => {
-      if (subDiv.isContentEditable || titDiv.isContentEditable) {
-        subDiv.contentEditable = "false"; titDiv.contentEditable = "false";
-        activeTasks[index].subject = subDiv.innerText; activeTasks[index].title = titDiv.innerText;
-        await chrome.storage.local.set({ activeTasks });
-      }
-    };
-    const start = (el) => { el.contentEditable = "true"; el.focus(); };
-    subDiv.addEventListener('dblclick', () => start(subDiv)); titDiv.addEventListener('dblclick', () => start(titDiv));
-    subDiv.addEventListener('blur', () => setTimeout(save, 100)); titDiv.addEventListener('blur', () => setTimeout(save, 100));
   }
 
   if (isLong) {
