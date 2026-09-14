@@ -1,7 +1,8 @@
 /* 
  [処理内容]
- SideDeck v1.0.3 のロジックプログラムです。
- 件名（task-subject）と本文（task-title）のダブルクリックによる内容編集＆自動保存処理を完全に復元いたしました。
+ SideDeck v1.0.4 のロジックプログラムです。
+ チケット編集枠（input / textarea / contenteditable）でコピペ（Ctrl+V）が行われた際は、
+ 新規タスク追加をスキップして入力欄への貼り付けを優先する防護判定を追加いたしました。
 */
 let activeTasks = [], completedTasks = [], customCategories = [], collapsedCategories = {}, categoryOrder = [];
 
@@ -217,7 +218,6 @@ function setupTaskCardDragAndDrop() {
 
   container.addEventListener('dragstart', (e) => {
     const card = e.target.closest('.task-card');
-    /* 編集中の文字選択ドラッグ時はカード移動を行いません */
     if (card && !e.target.isContentEditable) {
       draggedCard = card;
       card.classList.add('dragging');
@@ -320,7 +320,21 @@ function setupCategoryDragAndDrop() {
   });
 }
 
+/* 
+ [機能修正: クリップボードペースト時の入力欄フォーカス判定処理]
+ 入力フォームやダブルクリック編集枠にカーソルがある場合は、新規タスク作成処理を行わずにテキストの通常の貼り付けを優先します。
+*/
 async function processClipboardItems(cbd) {
+  /* 💡 現在フォーカスされている要素を取得し、編集枠（input / textarea / contenteditable）かどうかをチェックします */
+  const activeEl = document.activeElement;
+  if (activeEl) {
+    const tagName = activeEl.tagName.toLowerCase();
+    if (tagName === 'input' || tagName === 'textarea' || activeEl.isContentEditable) {
+      /* 入力・編集中なら、新規タスク追加処理をスキップして入力欄への貼付をそのまま行わせます */
+      return;
+    }
+  }
+
   let text = '', img = null;
   if (cbd.items) {
     for (let i = 0; i < cbd.items.length; i++) {
@@ -397,9 +411,6 @@ function createDueDateHtml(dStr) {
   return `<div class="${cls}">${txt}</div>`;
 }
 
-/* 
- [機能修復: カード描画および件名・本文のダブルクリック編集イベント登録]
-*/
 function createCardElement(task, index, isCompleted) {
   const card = document.createElement('div'); card.className = `task-card ${task.isImportant ? 'important' : ''} ${isCompleted ? 'completed-card' : ''}`;
   if (!isCompleted) { card.draggable = true; card.dataset.id = task.id || index.toString(); }
@@ -418,7 +429,6 @@ function createCardElement(task, index, isCompleted) {
 
   if (task.imageUrl) card.querySelector('.task-image-preview').addEventListener('click', () => { const w = window.open(""); w.document.write(`<img src="${task.imageUrl}" style="max-width:100%;" />`); });
 
-  /* ダブルクリックでの複数カテゴリ選択チェックボックス処理 */
   const catWrap = card.querySelector('.cat-tags-wrap');
   catWrap.addEventListener('dblclick', (e) => {
     e.stopPropagation();
@@ -444,11 +454,9 @@ function createCardElement(task, index, isCompleted) {
     multiBox.querySelector('#multi-box-cancel-btn').addEventListener('click', () => render());
   });
 
-  /* 💡 【バグ修復】件名および本文のダブルクリック編集イベントリスナーを確実にセットします */
   const subDiv = card.querySelector('.task-subject');
   const titDiv = card.querySelector('.task-title');
 
-  /* フォーカスが外れた際（blur）に自動保存する共通関数 */
   const saveContent = async () => {
     if (subDiv.isContentEditable || titDiv.isContentEditable) {
       subDiv.contentEditable = "false";
@@ -468,18 +476,15 @@ function createCardElement(task, index, isCompleted) {
     }
   };
 
-  /* 編集開始関数 */
   const startEditing = (element) => {
     element.contentEditable = "true";
     element.classList.add('editing');
     element.focus();
   };
 
-  /* ダブルクリック時に編集モード（入力可能）へ移行させます */
   subDiv.addEventListener('dblclick', (e) => { e.stopPropagation(); startEditing(subDiv); });
   titDiv.addEventListener('dblclick', (e) => { e.stopPropagation(); startEditing(titDiv); });
 
-  /* フォーカスアウト時に自動保存を実行します */
   subDiv.addEventListener('blur', () => setTimeout(saveContent, 100));
   titDiv.addEventListener('blur', () => setTimeout(saveContent, 100));
 
