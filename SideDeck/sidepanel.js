@@ -1,8 +1,8 @@
 /* 
  [処理内容]
- SideDeck v1.0.4 のロジックプログラムです。
- チケット編集枠（input / textarea / contenteditable）でコピペ（Ctrl+V）が行われた際は、
- 新規タスク追加をスキップして入力欄への貼り付けを優先する防護判定を追加いたしました。
+ SideDeck v1.1.0 のロジックプログラムです。
+ エラーの起きる同期APIを排除し、PCローカル内で100%確実に動作する最新プログラムです。
+ 「💾 保存」と「📂 復元」ボタンで簡単に別PCへデータを引っ越しできます。
 */
 let activeTasks = [], completedTasks = [], customCategories = [], collapsedCategories = {}, categoryOrder = [];
 
@@ -21,6 +21,7 @@ async function loadAndRender() {
   activeTasks = d.activeTasks || []; completedTasks = d.completedTasks || [];
   customCategories = d.customCategories || []; collapsedCategories = d.collapsedCategories || {};
   categoryOrder = d.categoryOrder || [];
+
   render(); updateCategoryDropdown();
 }
 
@@ -85,6 +86,10 @@ function updateCategoryDropdown() {
   set.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = `📁 ${c}`; s.appendChild(o); });
 }
 
+/* 
+ [💡 1クリック保存＆復元処理]
+ 「💾 保存」でJSON出力、「📂 復元」で別PCへのデータ移行がカンタンに行えます。
+*/
 function setupBackupAndRestore() {
   const ex = document.getElementById('export-btn'), im = document.getElementById('import-btn'), fi = document.getElementById('import-file-input');
   ex.addEventListener('click', () => {
@@ -320,17 +325,11 @@ function setupCategoryDragAndDrop() {
   });
 }
 
-/* 
- [機能修正: クリップボードペースト時の入力欄フォーカス判定処理]
- 入力フォームやダブルクリック編集枠にカーソルがある場合は、新規タスク作成処理を行わずにテキストの通常の貼り付けを優先します。
-*/
 async function processClipboardItems(cbd) {
-  /* 💡 現在フォーカスされている要素を取得し、編集枠（input / textarea / contenteditable）かどうかをチェックします */
   const activeEl = document.activeElement;
   if (activeEl) {
     const tagName = activeEl.tagName.toLowerCase();
     if (tagName === 'input' || tagName === 'textarea' || activeEl.isContentEditable) {
-      /* 入力・編集中なら、新規タスク追加処理をスキップして入力欄への貼付をそのまま行わせます */
       return;
     }
   }
